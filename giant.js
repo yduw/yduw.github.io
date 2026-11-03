@@ -60,15 +60,18 @@ uniform vec2 uSunUV;
 uniform vec3 uBoyPos;
 uniform float uBoyYaw;
 uniform vec3 uTreePos;
+uniform vec3 uHeadYPR;
+uniform vec2 uBoyHeadYP;
+uniform vec4 uCloudA, uCloudB;
 layout(location = 0) out vec4 oA;
 layout(location = 1) out vec4 oB;
 
 const float MIST_Y = -9.0;
-const float BOY_S = 1.6;
+const float BOY_S = 1.8;
 const float TREE_S = 0.7;
-const vec3 NECK_PIVOT = vec3(0.0, 9.85, 0.15);
-const float HEAD_YAW = -0.76, HEAD_PITCH = -0.42;
-const float BOY_HEAD_YAW = -0.75, BOY_HEAD_PITCH = -0.5;
+const vec3 NECK_PIVOT = vec3(0.0, 9.0, 0.08);
+#define BOY_HEAD_YAW uBoyHeadYP.x
+#define BOY_HEAD_PITCH uBoyHeadYP.y
 
 // ---------------- primitives ----------------
 float sdEllipsoid(vec3 p, vec3 r) { float k0 = length(p / r), k1 = length(p / (r * r)); return k0 * (k0 - 1.0) / max(k1, 1e-6); }
@@ -110,55 +113,102 @@ float sdRibbon(vec3 p, vec3 a, vec3 b, float hw, float ht, float tw0, float tw1)
 // ---------------- the land ----------------
 float terrainH(vec2 q) {
   float x = q.x, z = q.y;
-  float h = 5.3 * exp(-pow((z - 11.0) / 8.0, 2.0)) * (1.0 - 0.3 * smoothstep(6.0, 30.0, abs(x - 2.0)));
+  float h = 4.7 * exp(-pow((z - 11.0) / 8.0, 2.0)) * (1.0 - 0.3 * smoothstep(6.0, 30.0, abs(x - 2.0)));
   h -= 16.0 * (1.0 - smoothstep(-45.0, -3.0, z));
   h += 0.9 * (fbm2(q * 0.05) - 0.5) + 0.25 * (noise2(q * 0.4) - 0.5);
   return h;
 }
 
 // ---------------- the old automaton ----------------
-vec3 toHead(vec3 p) { return rotX(rotY(p - NECK_PIVOT, -HEAD_YAW), -HEAD_PITCH); }
+#define HEAD_YAW uHeadYPR.x
+#define HEAD_PITCH uHeadYPR.y
+#define HEAD_ROLL uHeadYPR.z
+vec3 rotZ(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x * c - v.y * s, v.x * s + v.y * c, v.z); }
+vec3 toHead(vec3 p) { return rotZ(rotX(rotY(p - NECK_PIVOT, -HEAD_YAW), -HEAD_PITCH), -HEAD_ROLL); }
+vec3 headToWorld(vec3 v) { return rotY(rotX(rotZ(v, HEAD_ROLL), HEAD_PITCH), HEAD_YAW); }
+// the head is an old diving helmet: a sphere with porthole eyes under heavy lids
+const vec3 HELM_C = vec3(0.0, 1.15, 0.0);
+const vec3 EYE_C = vec3(0.42, 1.22, 1.06);
+const float EYE_YAW = 0.377;
+const vec2 LID_N = vec2(0.116, 0.993);
+const float LID_K = 0.07;
+vec3 toEye(vec3 c) { return rotY(vec3(abs(c.x), c.y, c.z) - EYE_C, -EYE_YAW); }
+vec3 toGrille(vec3 c) { return rotX(c - vec3(0.0, 0.52, 0.97), -0.58); }
 
-float sdRobotHead(vec3 h) {
-  vec3 c = h - vec3(0.0, 1.0, 0.1);
-  float d = sdEllipsoid(c - vec3(0.0, 0.12, -0.05), vec3(1.18, 1.1, 1.12));
-  d = smin(d, sdRoundBox(c - vec3(0.0, -0.38, 0.05), vec3(0.98, 0.55, 0.95), 0.42), 0.3);
-  d = smax(d, c.z - 1.06, 0.18);
-  d = smin(d, sdRoundBox(c - vec3(0.0, 0.44, 0.98), vec3(1.0, 0.1, 0.13), 0.06), 0.04);
-  vec3 e = vec3(abs(c.x) - 0.43, c.y - 0.1, c.z - 1.06);
-  d = min(d, sdTorusZ(e, 0.25, 0.07));
-  d = min(d, sdRoundBox(c - vec3(0.0, -0.12, 1.08), vec3(0.09, 0.22, 0.07), 0.05));
-  d = min(d, sdRoundBox(c - vec3(0.0, -0.56, 1.02), vec3(0.46, 0.17, 0.08), 0.07));
-  vec3 ea = vec3(abs(c.x) - 1.16, c.y + 0.02, c.z - 0.05);
-  d = min(d, sdCylX(ea, 0.38, 0.09));
-  d = min(d, sdCylX(ea - vec3(0.09, 0.0, 0.0), 0.16, 0.07));
+float sdRobotHead(vec3 c) {
+  float d = length(c - HELM_C) - 1.15;
+  d = smin(d, sdTorus(c - vec3(0.0, 0.22, 0.0), vec2(0.86, 0.14)), 0.12);
+  vec3 q = toEye(c);
+  d = min(d, sdTorusZ(q, 0.29, 0.075));
+  d = min(d, max(sdCylZ(q - vec3(0.0, 0.0, 0.05), 0.31, 0.035), LID_K - dot(q.xy, LID_N)));
+  d = smin(d, sdRoundBox(toGrille(c), vec3(0.4, 0.16, 0.08), 0.06), 0.05);
+  vec3 ea = vec3(abs(c.x) - 1.1, c.y - 1.12, c.z - 0.02);
+  d = smin(d, sdCylX(ea, 0.36, 0.08), 0.04);
+  d = min(d, sdTorus(vec3(ea.y, ea.x - 0.08, ea.z), vec2(0.36, 0.06)));
+  d = min(d, sdCapsule(c, vec3(0.0, 2.2, -0.15), vec3(0.0, 2.45, -0.2), 0.1));
+  d = min(d, sdTorus(c - vec3(0.0, 2.45, -0.2), vec2(0.16, 0.05)));
   return d;
 }
 
+// barrel-shaped boiler torso with an elliptical cross-section
+float sdTorso(vec3 p, float inflate) {
+  vec3 q = vec3(p.x, p.y, p.z / 0.78);
+  float d = sdRoundCone(q, vec3(0.0, 4.3, 0.0), vec3(0.0, 6.9, 0.0), 1.85 + inflate, 2.3 + inflate) * 0.78;
+  return smax(d, p.y - 8.75 - inflate, 0.7);
+}
+float sdStack(vec3 p, vec3 a, vec3 b, float r) {
+  vec3 dir = normalize(b - a);
+  float d = sdCapsule(p, a, b, r);
+  d = min(d, sdRoundCone(p, mix(a, b, 0.86), b + dir * 0.22, r * 1.05, r * 1.6));
+  return smax(d, -sdCapsule(p, b - dir * 0.05, b + dir * 1.5, r * 1.15), 0.03);
+}
+const vec3 SHOULDER = vec3(2.95, 8.05, 0.0);
+vec3 toPauldron(vec3 m) { return rotZ(m - SHOULDER, 0.3); }
+const vec3 GAUGE_C = vec3(1.1, 7.95, 1.3);
+vec3 toGauge(vec3 p) { return rotX(rotY(p - GAUGE_C, -0.47), 0.4); }
+const vec3 STACK_A = vec3(-1.9, 8.2, -1.2), STACK_B = vec3(-2.45, 11.3, -2.2);
+
 float sdRobotBody(vec3 p) {
   vec3 m = vec3(abs(p.x), p.y, p.z);
-  float d = sdRoundBox(p - vec3(0.0, 6.4, 0.0), vec3(2.7, 2.5, 1.8), 1.3);
-  float shell = sdRoundBox(p - vec3(0.0, 6.4, 0.0), vec3(2.78, 2.58, 1.88), 1.38);
+  float d = sdTorso(p, 0.0);
+  float shell = sdTorso(p, 0.08);
   d = min(d, max(shell, abs(p.y - 7.45) - 0.13));
   d = min(d, max(shell, abs(p.y - 4.95) - 0.13));
-  vec3 fd = p - vec3(0.0, 6.05, 1.8);
-  d = min(d, sdTorusZ(fd, 0.8, 0.1));
-  d = min(d, sdCylZ(fd, 0.74, 0.05));
-  d = smin(d, sdTorus(p - vec3(0.0, 8.95, 0.0), vec2(1.05, 0.3)), 0.15);
-  d = min(d, sdCapsule(p, vec3(0.0, 8.9, 0.05), NECK_PIVOT + vec3(0.0, 0.2, 0.0), 0.6));
-  d = min(d, sdTorus(p - vec3(0.0, 9.45, 0.1), vec2(0.62, 0.07)));
-  vec3 sp = vec3(3.55, 8.3, 0.0);
-  d = smin(d, sdEllipsoid(m - sp, vec3(1.5, 1.2, 1.45)), 0.2);
-  d = min(d, sdEllipsoid(m - (sp + vec3(0.15, -0.5, 0.0)), vec3(1.66, 0.72, 1.6)));
-  d = min(d, sdEllipsoid(m - (sp + vec3(0.25, -0.95, 0.0)), vec3(1.72, 0.5, 1.64)));
-  vec3 el = vec3(4.5, 4.7, 0.6);
-  d = smin(d, sdRoundCone(m, sp + vec3(0.3, -0.9, 0.05), el, 0.95, 0.82), 0.2);
-  d = min(d, length(m - el) - 0.95);
-  d = min(d, sdRoundCone(m, el, vec3(4.35, 1.4, 2.2), 0.82, 0.7));
-  vec3 sa = vec3(1.6, 8.4, -1.3), sb = vec3(2.0, 12.4, -1.75);
-  d = min(d, sdCapsule(m, sa, sb, 0.34));
-  d = min(d, sdTorus(m - sb, vec2(0.4, 0.13)));
-  d = min(d, sdTorus(m - mix(sa, sb, 0.62), vec2(0.37, 0.07)));
+  d = smin(d, sdEllipsoid(p - vec3(0.0, 3.55, 0.0), vec3(2.15, 0.6, 1.72)), 0.25);
+  // furnace door
+  vec3 fd = p - vec3(0.0, 6.05, 1.72);
+  d = smin(d, sdCylZ(fd + vec3(0.0, 0.0, 0.15), 0.98, 0.12), 0.08);
+  d = min(d, sdTorusZ(fd, 0.76, 0.1));
+  // pressure gauge
+  vec3 gq = toGauge(p);
+  d = min(d, sdCylZ(gq - vec3(0.0, 0.0, 0.02), 0.3, 0.08));
+  d = min(d, sdTorusZ(gq - vec3(0.0, 0.0, 0.1), 0.29, 0.045));
+  // steam pipes up the chest
+  d = min(d, sdCapsule(m, vec3(1.55, 5.3, 1.28), vec3(1.5, 8.1, 1.45), 0.12));
+  d = min(d, sdTorus(m - vec3(1.53, 6.6, 1.36), vec2(0.15, 0.05)));
+  // breastplate and neck
+  d = smin(d, sdEllipsoid(p - vec3(0.0, 8.72, 0.05), vec3(1.55, 0.38, 1.25)), 0.2);
+  d = min(d, sdCapsule(p, vec3(0.0, 8.7, 0.05), NECK_PIVOT + vec3(0.0, 0.15, 0.0), 0.55));
+  // shoulders: ball joint, domed pauldron with a rolled rim, and a lame below it
+  d = smin(d, length(m - SHOULDER) - 0.9, 0.3);
+  vec3 sq = toPauldron(m);
+  float dome = sdEllipsoid(sq - vec3(0.0, 0.25, 0.0), vec3(1.32, 0.98, 1.28));
+  dome = smax(dome, -0.32 - sq.y, 0.05);
+  dome = min(dome, sdTorus(sq - vec3(0.0, -0.3, 0.0), vec2(1.07, 0.1)));
+  float lame = sdEllipsoid(sq - vec3(0.0, -0.55, 0.0), vec3(1.2, 0.5, 1.15));
+  lame = smax(lame, max(-0.85 - sq.y, sq.y + 0.3), 0.04);
+  d = min(d, min(dome, lame));
+  // arms and heavy hands resting in the grass
+  vec3 el = vec3(3.6, 5.25, 0.45), wr = vec3(3.45, 3.7, 2.55);
+  d = smin(d, sdRoundCone(m, SHOULDER + vec3(0.2, -0.5, 0.0), el, 0.68, 0.58), 0.12);
+  d = min(d, length(m - el) - 0.7);
+  d = min(d, sdRoundCone(m, el, wr, 0.6, 0.8));
+  d = smin(d, sdEllipsoid(m - (wr + vec3(0.0, -0.3, 0.45)), vec3(0.78, 0.6, 0.88)), 0.15);
+  d = min(d, sdCapsule(m, wr + vec3(-0.35, -0.35, 0.95), wr + vec3(-0.4, -1.0, 1.35), 0.22));
+  d = min(d, sdCapsule(m, wr + vec3(0.05, -0.35, 1.05), wr + vec3(0.05, -1.0, 1.5), 0.23));
+  d = min(d, sdCapsule(m, wr + vec3(0.42, -0.35, 0.9), wr + vec3(0.5, -1.0, 1.3), 0.21));
+  // a smokestack on the back
+  d = min(d, sdStack(p, STACK_A, STACK_B, 0.24));
   return d;
 }
 
@@ -167,10 +217,22 @@ float sdGiant(vec3 p) {
   if (bd > 1.0) return bd;
   float d = sdRobotBody(p);
   vec3 h = toHead(p);
-  float hb = length(h - vec3(0.0, 1.0, 0.1)) - 1.9;
+  float hb = length(h - HELM_C) - 1.75;
   d = smin(d, hb > 0.5 ? hb : sdRobotHead(h), 0.12);
   d += 0.035 * (noise3(p * 1.3) - 0.5) * (1.0 - smoothstep(0.2, 1.0, d));
   return d;
+}
+
+// a few puffs of smoke drifting off with the wind
+float sdSmoke(vec3 p) {
+  vec3 top = STACK_B + normalize(STACK_B - STACK_A) * 0.3;
+  float b = length(p - top - vec3(0.8, 1.0, -0.3)) - 2.0;
+  if (b > 0.5) return b;
+  float d = length(p - (top + vec3(-0.05, 0.42, -0.1))) - 0.24;
+  d = smin(d, length(p - (top + vec3(0.25, 0.95, -0.25))) - 0.34, 0.2);
+  d = smin(d, length(p - (top + vec3(0.8, 1.42, -0.4))) - 0.42, 0.25);
+  d = smin(d, length(p - (top + vec3(1.5, 1.72, -0.55))) - 0.44, 0.25);
+  return d + 0.1 * (noise3(p * 2.2) - 0.5);
 }
 
 float giantSurfaceY(vec2 xz) {
@@ -273,9 +335,9 @@ vec2 sdTree(vec3 pw) {
 
 // ---------------- clouds ----------------
 float sdClouds(vec3 p) {
-  vec3 q = p - vec3(72.0, 124.0, -450.0);
-  float d = length(q) - 75.0;
-  if (d < 8.0) {
+  vec3 q = (p - uCloudA.xyz) / uCloudA.w;
+  float d = (length(q) - 75.0) * uCloudA.w;
+  if (d < 6.0) {
     float c = sdEllipsoid(q - vec3(0.0, -10.0, 0.0), vec3(56.0, 12.0, 26.0));
     c = smin(c, length(q - vec3(-22.0, 2.0, 4.0)) - 20.0, 5.0);
     c = smin(c, length(q - vec3(4.0, 12.0, 0.0)) - 24.0, 5.0);
@@ -284,17 +346,17 @@ float sdClouds(vec3 p) {
     c = smin(c, length(q - vec3(10.0, 33.0, -4.0)) - 15.0, 5.0);
     c = smax(c, -(q.y + 18.0), 3.0);
     c += 4.0 * (fbm3(q * 0.05) - 0.5);
-    d = c;
+    d = c * uCloudA.w;
   }
-  vec3 s = p - vec3(-120.0, 58.0, -560.0);
-  float ds = length(s / vec3(3.0, 1.0, 1.5)) - 40.0;
+  vec3 s = p - uCloudB.xyz;
+  float ds = length(s / vec3(3.0, 1.0, 1.5)) - 30.0;
   if (ds < 10.0) {
-    float st = sdEllipsoid(s, vec3(95.0, 9.0, 40.0));
-    st = smin(st, length(s - vec3(-30.0, 6.0, 0.0)) - 15.0, 6.0);
-    st = smin(st, length(s - vec3(-6.0, 9.0, 0.0)) - 18.0, 6.0);
-    st = smin(st, length(s - vec3(22.0, 5.0, 0.0)) - 12.0, 6.0);
-    st = smax(st, -(s.y + 6.0), 3.0);
-    st += 3.0 * (fbm3(s * 0.06) - 0.5);
+    float st = sdEllipsoid(s, vec3(70.0, 5.0, 30.0));
+    st = smin(st, length(s - vec3(-24.0, 4.0, 0.0)) - 9.0, 5.0);
+    st = smin(st, length(s - vec3(-4.0, 6.0, 0.0)) - 11.0, 5.0);
+    st = smin(st, length(s - vec3(18.0, 3.0, 0.0)) - 7.0, 5.0);
+    st = smax(st, -(s.y + 3.0), 2.0);
+    st += 2.0 * (fbm3(s * 0.08) - 0.5);
     ds = st;
   }
   return min(d, ds);
@@ -338,7 +400,7 @@ vec2 mapScene(vec3 p) {
   if (b.x < res.x) res = vec2(b.x, b.y > 3.5 ? ID_BRASS : b.y > 2.5 ? ID_SKIN : b.y > 1.5 ? ID_SCARF : b.y > 0.5 ? ID_DARK : ID_BOY);
   vec2 t = sdTree(p);
   if (t.x < res.x) res = vec2(t.x, t.y > 0.5 ? ID_TREE : ID_TRUNK);
-  float c = sdClouds(p);
+  float c = min(sdClouds(p), sdSmoke(p));
   if (c < res.x) res = vec2(c, ID_CLOUD);
   return res;
 }
@@ -371,12 +433,13 @@ float calcAO(vec3 p, vec3 n) {
 
 // ---------------- pen marks ----------------
 // short, slightly uneven pen strokes running perpendicular to direction ang
+float gLen = 1.0;
 float penLines(vec2 fc, float ang, float S, float frac, float seed) {
   vec2 d = vec2(cos(ang), sin(ang));
   vec2 t = vec2(-d.y, d.x);
   float s = dot(fc, d) / S + 0.45 * (noise2(fc * 0.011 / uScale + seed) - 0.5);
   float li = floor(s + 0.5);
-  float L = (22.0 + 16.0 * hash11(li * 1.31 + seed)) * uScale;
+  float L = (22.0 + 16.0 * hash11(li * 1.31 + seed)) * uScale * gLen;
   float a = dot(fc, t) / L + hash11(li * 3.17 + seed) * 7.0;
   float si = floor(a), f = fract(a);
   float keep = step(hash12(vec2(li, si) + seed), 0.84);
@@ -408,7 +471,6 @@ float inkDot(vec2 q, float r, float fw) {
   fw = max(fw, 1e-6);
   return 1.0 - smoothstep(r - 0.7 * fw, r + 0.7 * fw, length(q));
 }
-vec3 headToWorld(vec3 v) { return rotY(rotX(v, HEAD_PITCH), HEAD_YAW); }
 float stipple(vec2 q, float cell, float pxPerUnit, float density) {
   vec2 c = floor(q / cell);
   float ink = 0.0;
@@ -545,86 +607,116 @@ void main() {
   float ao = calcAO(p, N);
   float spec = pow(clamp(dot(reflect(rd, N), uLight), 0.0, 1.0), 18.0);
   float tone = (0.2 + 0.15 * N.y) * mix(0.55, 1.0, ao) + 0.75 * dif * sh;
+  float lit = smoothstep(0.03, 0.4, dif * sh);
   vec2 nS = vec2(dot(N, uCamR), dot(N, uCamU));
   float formAng = length(nS) > 0.25 ? atan(nS.y, nS.x) : 2.35;
   float ink = 0.0, grass = 0.0;
 
   if (id == ID_GIANT) {
-    float g = 1.0 - clamp(tone + 0.6 * spec * sh, 0.0, 1.0);
+    float g = mix(0.66 + 0.3 * (1.0 - ao), 0.32 * (1.0 - dif) + 0.35 * (1.0 - ao), lit) - 0.3 * spec * sh;
     float c1 = penHatch(fc, formAng, 6.0 * uScale, smoothstep(0.25, 0.85, g) * 0.6, 1.0);
     float c2 = penHatch(fc, 2.3, 6.5 * uScale, smoothstep(0.5, 0.95, g) * 0.55, 2.0);
     float c3 = penHatch(fc, 0.6, 5.5 * uScale, smoothstep(0.72, 1.0, g) * 0.5, 3.0);
     ink = 1.0 - (1.0 - c1) * (1.0 - c2) * (1.0 - c3);
-    vec3 c = toHead(p) - vec3(0.0, 1.0, 0.1);
-    if (length(c) < 1.75 && p.y > 9.3) {
+    vec3 c = toHead(p);
+    if (length(c - HELM_C) < 1.7 && p.y > 8.95) {
       vec3 hX = headToWorld(vec3(1.0, 0.0, 0.0)), hY = headToWorld(vec3(0.0, 1.0, 0.0)), hZ = headToWorld(vec3(0.0, 0.0, 1.0));
       float sx = c.x < 0.0 ? -1.0 : 1.0;
-      // porthole eyes: clear glass, an iris ring, a pupil and a catch-light
-      vec2 e = vec2(abs(c.x) - 0.43, c.y - 0.1);
-      float er = max(length(e), 1e-4);
-      float fwE = fwG((e.x / er) * sx * hX + (e.y / er) * hY);
-      if (c.z > 0.85 && er < 0.215) {
-        float glass = 1.0 - smoothstep(0.2 - fwE, 0.2 + fwE, er);
+      // porthole eyes: clear glass under the lids, an iris ring, a pupil and a catch-light
+      vec3 q = toEye(c);
+      float er = max(length(q.xy), 1e-4);
+      vec3 eX = headToWorld(vec3(sx * cos(EYE_YAW), 0.0, -sin(EYE_YAW)));
+      float fwE = fwG((q.x / er) * eX + (q.y / er) * hY);
+      if (er < 0.225 && q.z < 0.03 && dot(q.xy, LID_N) < LID_K) {
+        float glass = 1.0 - smoothstep(0.205 - fwE, 0.205 + fwE, er);
         ink *= 1.0 - glass;
-        ink = max(ink, inkLine(er - 0.12, fwE, 1.4 * uScale));
-        ink = max(ink, inkDot(e - vec2(-0.02, 0.01), 0.065, pxW));
-        ink = min(ink, 1.0 - inkDot(e - vec2(-0.045, 0.04), 0.02, pxW));
-        ink = max(ink, glass * penHatch(fc, 0.8, 3.0 * uScale, smoothstep(0.13, 0.2, er) * 0.45, 9.0));
+        ink = max(ink, glass * inkLine(er - 0.13, fwE, 1.4 * uScale));
+        ink = max(ink, glass * inkDot(q.xy - vec2(-0.025, -0.01), 0.07, pxW));
+        ink = min(ink, 1.0 - glass * inkDot(q.xy - vec2(-0.06, 0.02), 0.022, pxW));
+        ink = max(ink, glass * penHatch(fc, 0.8, 3.0 * uScale, smoothstep(0.14, 0.2, er) * 0.4, 9.0));
       }
       // mouth grille slots
-      vec2 mg = vec2(c.x, c.y + 0.56);
-      if (c.z > 0.9 && abs(mg.x) < 0.38 && abs(mg.y) < 0.12)
-        ink = max(ink, inkLine(fract(mg.y / 0.06 + 0.5) - 0.5, fwG(hY / 0.06), 1.6 * uScale));
-      // rivets along the brow band
-      if (c.z > 0.8 && abs(c.y - 0.44) < 0.08)
-        ink = max(ink, inkDot(vec2((fract(c.x / 0.18 + 0.5) - 0.5) * 0.18, c.y - 0.44), 0.025, pxW));
+      vec3 mq = toGrille(c);
+      if (mq.z > 0.03 && abs(mq.x) < 0.33 && abs(mq.y) < 0.11)
+        ink = max(ink, inkLine(fract(mq.y / 0.055 + 0.5) - 0.5, fwG(headToWorld(vec3(0.0, cos(0.58), sin(0.58))) / 0.055), 1.6 * uScale));
+      // rivets on the helmet's base ring
+      if (abs(c.y - 0.3) < 0.1 && length(c.xz) > 0.7)
+        ink = max(ink, inkDot(vec2((fract(atan(c.x, c.z) * 0.86 / 0.2 + 0.5) - 0.5) * 0.2, c.y - 0.3), 0.032, pxW));
       // a riveted seam over the crown
-      if (c.y > 0.55 && c.z < 0.98) {
+      vec3 hc = c - HELM_C;
+      if (hc.y > 0.45 && hc.z < 0.8) {
         ink = max(ink, 0.9 * inkLine(c.x, fwG(hX), 1.3 * uScale));
-        float arc = atan(c.z + 0.05, c.y - 0.12) * 1.15;
+        float arc = atan(hc.z, hc.y) * 1.15;
         ink = max(ink, inkDot(vec2(abs(c.x) - 0.08, (fract(arc / 0.17 + 0.5) - 0.5) * 0.17), 0.022, pxW));
       }
-      // ear discs: concentric vents
-      vec3 ea = vec3(abs(c.x) - 1.16, c.y + 0.02, c.z - 0.05);
+      // side portholes: concentric vents
+      vec3 ea = vec3(abs(c.x) - 1.1, c.y - 1.12, c.z - 0.02);
       float rr = max(length(ea.yz), 1e-4);
-      if (abs(ea.x) < 0.2 && rr < 0.36)
-        ink = max(ink, 0.8 * inkLine(fract(rr / 0.08) - 0.5, fwG(((ea.y / rr) * hY + (ea.z / rr) * hZ) / 0.08), 1.3 * uScale));
+      if (abs(ea.x) < 0.2 && rr < 0.3)
+        ink = max(ink, 0.8 * inkLine(fract(rr / 0.075) - 0.5, fwG(((ea.y / rr) * hY + (ea.z / rr) * hZ) / 0.075), 1.3 * uScale));
     } else {
       // the furnace door: grate bars inside a riveted flange
-      vec3 fd = p - vec3(0.0, 6.05, 1.8);
+      vec3 fd = p - vec3(0.0, 6.05, 1.72);
       float fr = max(length(fd.xy), 1e-4);
       if (fd.z > -0.2 && fr < 0.7) {
         float inGrate = step(abs(fd.y), sqrt(max(0.42 - fd.x * fd.x, 0.0)));
         ink = max(ink, inGrate * inkLine(fract(fd.x / 0.16 + 0.5) - 0.5, fwG(vec3(1.0 / 0.16, 0.0, 0.0)), 1.5 * uScale));
+        ink = max(ink, inGrate * penHatch(fc, 0.0, 2.6 * uScale, 0.55, 15.0));
         ink = max(ink, inkLine(fr - 0.62, fwG(vec3(fd.x / fr, fd.y / fr, 0.0)), 1.3 * uScale));
       }
-      if (fd.z > -0.3 && fr > 0.85 && fr < 1.02) {
-        float ra = atan(fd.y, fd.x) * 0.95 / 0.25;
-        ink = max(ink, inkDot(vec2((fract(ra) - 0.5) * 0.25, fr - 0.94), 0.035, pxW));
+      if (fd.z > -0.35 && fr > 0.86 && fr < 0.98) {
+        float ra = atan(fd.y, fd.x) * 0.92 / 0.24;
+        ink = max(ink, inkDot(vec2((fract(ra) - 0.5) * 0.24, fr - 0.92), 0.034, pxW));
       }
-      if (p.y > 4.6 && p.y < 9.0 && abs(p.x) < 3.2) {
+      // pressure gauge: dial ring, needle and hub
+      vec3 gq = toGauge(p);
+      float gr = length(gq.xy);
+      if (gq.z > 0.06 && gr < 0.26) {
+        ink *= 0.3;
+        ink = max(ink, inkLine(gr - 0.2, pxW, 1.1 * uScale));
+        vec2 nd = vec2(cos(2.3), sin(2.3));
+        ink = max(ink, inkLine(length(gq.xy - nd * clamp(dot(gq.xy, nd), 0.0, 0.19)), pxW, 1.8 * uScale));
+        ink = max(ink, inkDot(gq.xy, 0.03, pxW));
+      }
+      if (p.y > 4.2 && p.y < 8.9 && length(p.xz) < 3.0) {
+        float arc = atan(p.x, p.z / 0.78) * 2.2;
+        vec3 tan3 = normalize(vec3(N.z, 0.0, -N.x) + 1e-5);
         for (int i = 0; i < 2; i++) {
           float sy = i == 0 ? 7.45 : 4.95;
           float dy = p.y - sy;
           // rivets on the bands
-          if (abs(dy) < 0.12) ink = max(ink, inkDot(vec2((fract((p.x + p.z * 0.5) / 0.3 + 0.5) - 0.5) * 0.3, dy), 0.04, pxW));
+          if (abs(dy) < 0.12) ink = max(ink, inkDot(vec2((fract(arc / 0.3 + 0.5) - 0.5) * 0.3, dy), 0.04, pxW));
           // rust running down from the seams
-          float col = floor(p.x / 0.13);
+          float col = floor(arc / 0.13);
           float len = 0.25 + 1.1 * hash11(col * 5.3 + float(i));
-          if (hash11(col * 2.7 + float(i) * 11.0) > 0.72 && dy < -0.13 && dy > -0.13 - len && N.z > 0.2)
-            ink = max(ink, 0.9 * inkLine((fract(p.x / 0.13) - 0.5) * 0.13, fwG(vec3(1.0, 0.0, 0.0)), (1.6 - 1.2 * (-dy - 0.13) / len) * uScale));
+          if (hash11(col * 2.7 + float(i) * 11.0) > 0.72 && dy < -0.13 && dy > -0.13 - len)
+            ink = max(ink, 0.9 * inkLine((fract(arc / 0.13) - 0.5) * 0.13, fwG(tan3), (1.6 - 1.2 * (-dy - 0.13) / len) * uScale));
         }
         // plate seams with rivets
-        float ax = abs(p.x) - 1.45;
-        if (abs(ax) < 0.15 && p.y > 5.1 && p.y < 7.3 && N.z > 0.3) {
-          ink = max(ink, inkLine(ax, fwG(vec3(sign(p.x), 0.0, 0.0)), 1.4 * uScale));
+        float ax = abs(arc) - 2.4;
+        if (abs(ax) < 0.15 && p.y > 5.1 && p.y < 7.3) {
+          ink = max(ink, inkLine(ax, fwG(tan3), 1.4 * uScale));
           ink = max(ink, inkDot(vec2(abs(ax) - 0.08, (fract(p.y / 0.28) - 0.5) * 0.28), 0.03, pxW));
         }
+        // repair patches riveted over the old plates
+        vec2 pc = vec2(arc, p.y);
+        for (int k = 0; k < 2; k++) {
+          vec4 R = k == 0 ? vec4(1.75, 2.45, 5.3, 6.45) : vec4(-2.3, -1.6, 7.6, 8.3);
+          vec2 dd = max(R.xz - pc, pc - R.yw);
+          float box = max(dd.x, dd.y);
+          if (box < 0.05) {
+            bool vert = dd.x > dd.y;
+            ink = max(ink, inkLine(box, fwG(vert ? tan3 : vec3(0.0, 1.0, 0.0)), 1.4 * uScale));
+            float tt = vert ? p.y : arc;
+            if (box > -0.14) ink = max(ink, inkDot(vec2(box + 0.08, (fract(tt / 0.19 + 0.5) - 0.5) * 0.19), 0.027, pxW));
+            if (box < 0.0) ink = max(ink, penHatch(fc, 1.1, 4.0 * uScale, 0.3, 16.0));
+          }
+        }
       }
-      // pauldron rings
-      vec3 sp = vec3(abs(p.x) - 3.55, p.y - 8.3, p.z);
-      if (length(sp) < 2.0 && p.y > 7.2)
-        ink = max(ink, 0.55 * smoothstep(0.2, 0.6, g) * inkLine(fract((p.y - 8.3) / 0.38) - 0.5, fwG(vec3(0.0, 1.0 / 0.38, 0.0)), 1.1 * uScale));
+      // pauldrons: rivets above the rolled rim
+      vec3 sq = toPauldron(vec3(abs(p.x), p.y, p.z));
+      if (abs(sq.y + 0.12) < 0.07 && length(sq.xz) > 1.0)
+        ink = max(ink, inkDot(vec2((fract(atan(sq.x, sq.z) * 1.1 / 0.24 + 0.5) - 0.5) * 0.24, sq.y + 0.12), 0.035, pxW));
     }
     // age: rust blotches, and moss with grass where rain and seeds settle
     float rust = smoothstep(0.62, 0.72, fbm3(p * 0.9 + 2.0));
@@ -633,7 +725,7 @@ void main() {
     ink = max(ink, stipple(p.xz, 0.09, pxPerUnit, 0.35 * moss));
     grass = moss * 0.3;
   } else if (id == ID_BOY) {
-    float g = 1.0 - clamp(tone * 1.05, 0.0, 1.0);
+    float g = mix(0.92, 0.5 * (1.0 - dif) + 0.28, lit) + 0.2 * (1.0 - ao);
     float c1 = penHatch(fc, formAng, 3.4 * uScale, smoothstep(0.25, 0.8, g) * 0.6, 4.0);
     float c2 = penHatch(fc, 2.3, 3.6 * uScale, smoothstep(0.55, 0.95, g) * 0.55, 5.0);
     ink = 1.0 - (1.0 - c1) * (1.0 - c2);
@@ -647,7 +739,7 @@ void main() {
     ink = 1.0 - rimL * 0.75;
     ink = min(ink, 1.0 - penHatch(fc, 2.2, 3.0 * uScale, rimL * 0.5, 6.0));
   } else if (id == ID_SKIN) {
-    float g = 1.0 - clamp(tone * 1.15, 0.0, 1.0);
+    float g = (1.0 - lit) * 0.62 + 0.3 * (1.0 - ao);
     ink = penHatch(fc, 2.3, 3.2 * uScale, smoothstep(0.45, 0.9, g) * 0.45, 7.0);
     // face: eyes looking up and to the left, brows, mouth
     vec3 q = (p - gBoy) / BOY_S;
@@ -663,26 +755,28 @@ void main() {
       if (abs(mo.x) < 0.014) ink = max(ink, inkLine(mo.y - 6.0 * mo.x * mo.x, fwB, 1.1 * uScale));
     }
   } else if (id == ID_SCARF) {
-    float g = 1.0 - clamp(tone * 1.2, 0.0, 1.0);
+    float g = (1.0 - lit) * 0.7 + 0.3 * (1.0 - ao);
     ink = penHatch(fc, 1.3, 3.0 * uScale, smoothstep(0.35, 0.9, g) * 0.45, 8.0);
   } else if (id == ID_BRASS) {
     float g = 1.0 - clamp(tone + spec, 0.0, 1.0);
     ink = penHatch(fc, 0.8, 2.6 * uScale, smoothstep(0.3, 0.9, g) * 0.5, 9.0);
   } else if (id == ID_TREE) {
-    float g = 1.0 - clamp(tone * 1.1, 0.0, 1.0);
+    float g = mix(0.88, 0.45 * (1.0 - dif) + 0.12, lit) + 0.2 * (1.0 - ao);
     ink = penHatch(fc, formAng, 4.0 * uScale, smoothstep(0.2, 0.85, g) * 0.6, 10.0);
     ink = max(ink, penHatch(fc, 2.3, 4.2 * uScale, smoothstep(0.55, 1.0, g) * 0.5, 11.0));
   } else if (id == ID_TRUNK) {
     ink = max(penHatch(fc, 0.1, 3.0 * uScale, 0.45, 12.0), 1.0 - smoothstep(0.15, 0.4, tone));
   } else if (id == ID_CLOUD) {
-    float g = 1.0 - clamp(0.62 + 0.45 * N.y + 0.5 * dif, 0.0, 1.0);
-    ink = penHatch(fc, 1.57, 7.0 * uScale, smoothstep(0.35, 0.8, g) * 0.3, 13.0);
+    ink = 0.0;
   } else {
     // meadow: loose pen strokes, a few flowers, grass
     float haze = smoothstep(MIST_Y, MIST_Y + 8.0, p.y);
-    float g = (1.0 - clamp(tone * 1.15, 0.0, 1.0)) * haze;
+    float g = (1.0 - lit) * 0.75 * haze;
     float nearT = 1.0 - smoothstep(30.0, 90.0, t);
-    ink = penHatch(fc, 2.6, 8.0 * uScale, (smoothstep(0.35, 0.9, g) * 0.45 + 0.1 * nearT) * smoothstep(0.35, 0.6, noise2(p.xz * 0.15)), 14.0);
+    float patchy = smoothstep(0.42, 0.68, noise2(p.xz * 0.11 + 1.7));
+    gLen = 2.4;
+    ink = penHatch(fc, 2.75, 11.0 * uScale, (0.5 * smoothstep(0.3, 0.9, g) + 0.22 * nearT) * patchy, 14.0);
+    gLen = 1.0;
     vec2 fq = p.xz / 0.55;
     vec2 fcell = floor(fq);
     if (nearT > 0.0 && hash12(fcell) < 0.07 * nearT) {
@@ -692,7 +786,7 @@ void main() {
       ink = max(ink, inkLine(fr - 0.13, fwF, 1.2 * uScale));
       ink = max(ink, inkDot(fs, 0.04, fwF));
     }
-    grass = haze * nearT * 0.16 * smoothstep(0.4, 0.6, noise2(p.xz * 0.2 + 3.0));
+    grass = haze * nearT * 0.2 * smoothstep(0.62, 0.78, noise2(p.xz * 0.3 + 3.0));
   }
   encodeOut(ink, id, t, N, grass, 0.0);
 }
@@ -842,15 +936,22 @@ void main() {
   function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
 
+  // directions given as [right, up, toward viewer] are relative to the camera, so the lighting, the
+  // gazes and the clouds stay put on the page when the camera moves
   var DEFAULTS = {
-    cam: [1.2, 6.5, 30.0],
-    target: [-0.3, 9.3, 0.0],
-    fovY: 28,
-    light: [-0.6, 0.5, 0.6],
+    cam: [8.5, 6.4, 25.0],
+    target: [0.8, 8.9, 0.0],
+    fovY: 30,
+    light: [-0.65, 0.55, 0.5],
     sunUV: [-0.86, 0.9],
-    boy: [3.15, 9.2, 0.15],
-    boyYaw: 0.0,
-    tree: [-3.3, 9.0, -0.3]
+    gaze: [-0.55, 0.42, 0.72],
+    headRoll: 0.1,
+    boy: [3.2, 9.2, 0.1],
+    boyYaw: -0.21,
+    boyGaze: [-0.6, 0.55, 0.58],
+    tree: [-3.2, 9.0, -0.2],
+    cloudA: [0.42, 0.62, 480, 0.6],
+    cloudB: [-0.42, 0.42, 600, 1.0]
   };
 
   function renderGiant(canvas, options) {
@@ -909,6 +1010,15 @@ void main() {
       var R = norm(cross(F, [0, 1, 0]));
       var U = cross(R, F);
       var focal = 1 / Math.tan(o.fovY * Math.PI / 360);
+      function camDir(v) { return norm([R[0] * v[0] + U[0] * v[1] - F[0] * v[2], R[1] * v[0] + U[1] * v[1] - F[1] * v[2], R[2] * v[0] + U[2] * v[1] - F[2] * v[2]]); }
+      var G = camDir(o.gaze);
+      var cb = Math.cos(o.boyYaw), sb = Math.sin(o.boyYaw);
+      var Gb = camDir(o.boyGaze);
+      Gb = [cb * Gb[0] + sb * Gb[2], Gb[1], -sb * Gb[0] + cb * Gb[2]];
+      function cloud(c) {
+        var d = norm([R[0] * c[0] + U[0] * c[1] + F[0] * focal, R[1] * c[0] + U[1] * c[1] + F[1] * focal, R[2] * c[0] + U[2] * c[1] + F[2] * focal]);
+        return [o.cam[0] + d[0] * c[2], o.cam[1] + d[1] * c[2], o.cam[2] + d[2] * c[2], c[3]];
+      }
       var scale = H / 1300;
 
       gl.useProgram(p1.prog);
@@ -920,7 +1030,11 @@ void main() {
       gl.uniform3fv(u('uCamF'), F);
       gl.uniform1f(u('uFocal'), focal);
       gl.uniform1f(u('uScale'), scale);
-      gl.uniform3fv(u('uLight'), norm(o.light));
+      gl.uniform3fv(u('uLight'), camDir(o.light));
+      gl.uniform3f(u('uHeadYPR'), Math.atan2(G[0], G[2]), -Math.asin(G[1]), o.headRoll);
+      gl.uniform2f(u('uBoyHeadYP'), Math.atan2(Gb[0], Gb[2]), -Math.asin(Gb[1]));
+      gl.uniform4fv(u('uCloudA'), cloud(o.cloudA));
+      gl.uniform4fv(u('uCloudB'), cloud(o.cloudB));
       gl.uniform2fv(u('uSunUV'), o.sunUV);
       gl.uniform3fv(u('uBoyPos'), o.boy);
       gl.uniform1f(u('uBoyYaw'), o.boyYaw);
