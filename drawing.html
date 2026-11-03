@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Giant drawing preview</title>
+  <style>
+    :root { --bg: #fff; }
+    html, body { margin: 0; background: var(--bg); }
+    body { display: flex; justify-content: center; padding: 24px 16px; }
+    canvas { width: min(520px, 100%); aspect-ratio: 4 / 5; display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="art" width="1040" height="1300" aria-label="Ink drawing of a boy on a giant's shoulder at sunrise"></canvas>
+  <script src="giant.js"></script>
+  <script>
+    renderGiant(document.getElementById('art')).then(function () {
+      document.body.setAttribute('data-rendered', 'true');
+    }).catch(function (e) {
+      document.body.setAttribute('data-rendered', 'error');
+      console.error(e);
+    });
+  </script>
+</body>
+</html>
