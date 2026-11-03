@@ -22,7 +22,7 @@
 precision highp float;
 precision highp int;
 const float ID_SKY = 0.0, ID_TERRAIN = 1.0, ID_GIANT = 2.0, ID_BOY = 3.0, ID_DARK = 4.0,
-            ID_TREE = 5.0, ID_TRUNK = 6.0, ID_CLOUD = 7.0, ID_MIST = 8.0, ID_RIDGE = 10.0;
+            ID_TREE = 5.0, ID_TRUNK = 6.0, ID_CLOUD = 7.0, ID_MIST = 8.0, ID_SCARF = 9.0, ID_RIDGE = 10.0;
 
 float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -60,9 +60,9 @@ uniform vec3 uTreePos;
 layout(location = 0) out vec4 oA;
 layout(location = 1) out vec4 oB;
 
-const float MIST_Y = -6.5;
+const float MIST_Y = 3.4;
 const float BOY_S = 1.6;
-const float SUN_R = 0.024;
+const float SUN_R = 0.019;
 const vec3 HEAD_C = vec3(0.0, 11.0, -0.55);
 
 // ---------------- primitives ----------------
@@ -80,6 +80,19 @@ float sdRoundCone(vec3 p, vec3 a, vec3 b, float r1, float r2) {
 }
 float sdRoundBox(vec3 p, vec3 b, float r) { vec3 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r; }
 float sdTorus(vec3 p, vec2 t) { vec2 q = vec2(length(p.xz) - t.x, p.y); return length(q) - t.y; }
+float sdRibbon(vec3 p, vec3 a, vec3 b, float hw, float ht, float tw0, float tw1) {
+  vec3 ba = b - a;
+  float h = clamp(dot(p - a, ba) / dot(ba, ba), 0.0, 1.0);
+  vec3 d = p - (a + ba * h);
+  vec3 T = normalize(ba);
+  vec3 W0 = normalize(vec3(0.0, 1.0, 0.0) - T * T.y);
+  vec3 T0 = cross(T, W0);
+  float tw = mix(tw0, tw1, h);
+  vec3 Wd = cos(tw) * W0 + sin(tw) * T0;
+  vec3 Th = cross(T, Wd);
+  vec3 q = abs(vec3(dot(d, Wd), dot(d, Th), dot(d, T))) - vec3(hw, ht, 0.0);
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - 0.004;
+}
 float smin(float a, float b, float k) { float h = max(k - abs(a - b), 0.0) / k; return min(a, b) - h * h * k * 0.25; }
 float smax(float a, float b, float k) { return -smin(-a, -b, k); }
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
@@ -107,11 +120,14 @@ float sdGiant(vec3 p) {
   d = smin(d, sdCapsule(p, nb, sr, 0.95), 0.9);
   d = smin(d, length(p - vec3(-3.95, 7.75, -0.25)) - 1.22, 0.6);
   d = smin(d, length(p - vec3(3.95, 7.75, -0.25)) - 1.22, 0.6);
-  d = smin(d, sdEllipsoid(p - vec3(-1.7, 7.0, 1.8), vec3(1.25, 1.5, 0.55)), 0.8);
-  d = smin(d, sdEllipsoid(p - vec3(1.7, 7.0, 1.8), vec3(1.25, 1.5, 0.55)), 0.8);
-  d = smax(d, -sdCapsule(p, vec3(0.0, 3.0, 2.75), vec3(0.0, 8.3, 2.35), 0.3), 0.5);
+  d = smin(d, sdEllipsoid(p - vec3(0.0, 6.6, 1.2), vec3(2.9, 2.4, 1.3)), 1.2);
+  d = smax(d, -sdCapsule(p, vec3(0.0, 3.0, 2.85), vec3(0.0, 7.8, 2.6), 0.22), 0.6);
   d = smin(d, sdCapsule(p, vec3(0.0, 8.3, -0.15), vec3(0.0, 9.9, -0.5), 0.82), 0.6);
   d = smin(d, sdEllipsoid(p - HEAD_C, vec3(1.22, 1.36, 1.28)), 0.5);
+  float hairCap = sdEllipsoid(p - (HEAD_C + vec3(0.0, 0.18, 0.08)), vec3(1.33, 1.3, 1.38));
+  hairCap = smax(hairCap, (HEAD_C.y - 0.5 - 0.35 * (p.z - HEAD_C.z)) - p.y, 0.25);
+  hairCap += 0.16 * (noise3(p * 3.2) - 0.5);
+  d = smin(d, hairCap, 0.12);
   d = smin(d, sdEllipsoid(p - (HEAD_C + vec3(-1.08, -0.08, 0.15)), vec3(0.2, 0.42, 0.3)), 0.12);
   d = smin(d, sdEllipsoid(p - (HEAD_C + vec3(1.08, -0.08, 0.15)), vec3(0.2, 0.42, 0.3)), 0.12);
   vec3 el = vec3(-4.6, 4.9, -1.8), er = vec3(4.6, 4.9, -1.8);
@@ -128,10 +144,21 @@ float sdGiant(vec3 p) {
   return d;
 }
 
+float giantSurfaceY(vec2 xz) {
+  float y = 13.5;
+  for (int i = 0; i < 48; i++) {
+    float d = sdGiant(vec3(xz.x, y, xz.y));
+    if (d < 0.002) break;
+    y -= max(d * 0.9, 0.004);
+  }
+  return y;
+}
+
 // ---------------- the boy (unit height, scaled) ----------------
+vec3 gBoy, gTree;
 vec2 sdBoy(vec3 pw) {
-  vec3 p = pw - uBoyPos;
-  float bd = length(p - vec3(0.0, 0.75, 0.0)) - 1.3;
+  vec3 p = pw - gBoy;
+  float bd = length(p - vec3(0.0, 0.8, 0.0)) - 1.35;
   if (bd > 0.4) return vec2(bd, 0.0);
   p.xz = rot(uBoyYaw) * p.xz;
   p /= BOY_S;
@@ -139,14 +166,16 @@ vec2 sdBoy(vec3 pw) {
   d = smin(d, sdEllipsoid(p - vec3(0.0, 0.728, 0.0), vec3(0.138, 0.05, 0.075)), 0.03);
   d = smin(d, sdRoundCone(p, vec3(-0.058, 0.5, 0.0), vec3(-0.085, 0.07, 0.01), 0.055, 0.038), 0.02);
   d = smin(d, sdRoundCone(p, vec3(0.058, 0.5, 0.0), vec3(0.092, 0.07, -0.015), 0.055, 0.038), 0.02);
-  vec3 shR = vec3(0.12, 0.71, 0.0), elR = vec3(0.245, 0.815, -0.05), haR = vec3(0.37, 0.93, -0.1);
+  // arms akimbo: elbows out, hands resting on the hips
+  vec3 shR = vec3(0.118, 0.71, 0.0), elR = vec3(0.235, 0.6, 0.03), haR = vec3(0.112, 0.505, 0.0);
   d = smin(d, sdCapsule(p, shR, elR, 0.034), 0.02);
-  d = min(d, sdCapsule(p, elR, haR, 0.029));
-  vec3 shL = vec3(-0.12, 0.71, 0.0), elL = vec3(-0.16, 0.585, 0.025), haL = vec3(-0.165, 0.47, -0.005);
+  d = smin(d, sdCapsule(p, elR, haR, 0.029), 0.012);
+  vec3 shL = vec3(-0.118, 0.71, 0.0), elL = vec3(-0.235, 0.6, 0.03), haL = vec3(-0.112, 0.505, 0.0);
   d = smin(d, sdCapsule(p, shL, elL, 0.034), 0.02);
-  d = min(d, sdCapsule(p, elL, haL, 0.029));
-  d = min(d, sdRoundBox(p - vec3(-0.148, 0.47, 0.035), vec3(0.03, 0.058, 0.078), 0.014));
-  d = min(d, sdCapsule(p, vec3(0.1, 0.735, 0.078), vec3(-0.135, 0.52, 0.075), 0.011));
+  d = smin(d, sdCapsule(p, elL, haL, 0.029), 0.012);
+  d = min(d, sdRoundBox(p - vec3(0.0, 0.62, 0.105), vec3(0.06, 0.07, 0.03), 0.018));
+  d = min(d, sdCapsule(p, vec3(0.085, 0.725, 0.06), vec3(0.04, 0.68, 0.1), 0.01));
+  d = min(d, sdCapsule(p, vec3(-0.085, 0.725, 0.06), vec3(-0.04, 0.68, 0.1), 0.01));
   d = smin(d, sdCapsule(p, vec3(0.0, 0.73, 0.0), vec3(0.0, 0.82, -0.005), 0.038), 0.02);
   d = min(d, length(p - vec3(0.0, 0.885, -0.008)) - 0.082);
   // dark parts: hair, scarf, boots
@@ -155,25 +184,31 @@ vec2 sdBoy(vec3 pw) {
   hair = min(hair, sdCapsule(p, vec3(0.025, 0.95, 0.05), vec3(-0.035, 0.985, 0.125), 0.016));
   hair = min(hair, sdCapsule(p, vec3(-0.06, 0.885, 0.05), vec3(-0.13, 0.87, 0.1), 0.016));
   float scarf = sdTorus(p - vec3(0.0, 0.765, 0.0), vec2(0.06, 0.026));
-  vec3 s0 = vec3(-0.03, 0.76, 0.06), s1 = vec3(-0.12, 0.785, 0.15), s2 = vec3(-0.22, 0.75, 0.22), s3 = vec3(-0.33, 0.795, 0.28), s4 = vec3(-0.43, 0.765, 0.33);
-  scarf = min(scarf, sdCapsule(p, s0, s1, 0.026));
-  scarf = min(scarf, sdCapsule(p, s1, s2, 0.024));
-  scarf = min(scarf, sdCapsule(p, s2, s3, 0.02));
-  scarf = min(scarf, sdCapsule(p, s3, s4, 0.015));
-  vec3 t1 = vec3(-0.1, 0.72, 0.13), t2 = vec3(-0.19, 0.69, 0.2), t3 = vec3(-0.27, 0.71, 0.25);
-  scarf = min(scarf, sdCapsule(p, s0, t1, 0.022));
-  scarf = min(scarf, sdCapsule(p, t1, t2, 0.018));
-  scarf = min(scarf, sdCapsule(p, t2, t3, 0.013));
+  vec3 s0 = vec3(-0.03, 0.755, 0.06), s1 = vec3(-0.1, 0.705, 0.12), s2 = vec3(-0.18, 0.745, 0.17),
+       s3 = vec3(-0.27, 0.69, 0.2), s4 = vec3(-0.36, 0.73, 0.22), s5 = vec3(-0.45, 0.675, 0.23);
+  scarf = min(scarf, sdRibbon(p, s0, s1, 0.036, 0.007, 0.0, 0.5));
+  scarf = min(scarf, sdRibbon(p, s1, s2, 0.034, 0.007, 0.5, 1.1));
+  scarf = min(scarf, sdRibbon(p, s2, s3, 0.03, 0.006, 1.1, 0.3));
+  scarf = min(scarf, sdRibbon(p, s3, s4, 0.027, 0.006, 0.3, -0.5));
+  scarf = min(scarf, sdRibbon(p, s4, s5, 0.022, 0.005, -0.5, 0.2));
+  vec3 t1 = vec3(-0.07, 0.66, 0.1), t2 = vec3(-0.14, 0.6, 0.14), t3 = vec3(-0.22, 0.625, 0.17);
+  scarf = min(scarf, sdRibbon(p, s0, t1, 0.026, 0.006, 0.2, 0.8));
+  scarf = min(scarf, sdRibbon(p, t1, t2, 0.024, 0.006, 0.8, 0.2));
+  scarf = min(scarf, sdRibbon(p, t2, t3, 0.02, 0.005, 0.2, -0.4));
   float boots = min(sdEllipsoid(p - vec3(-0.085, 0.032, -0.02), vec3(0.05, 0.034, 0.085)),
                     sdEllipsoid(p - vec3(0.094, 0.032, -0.045), vec3(0.05, 0.034, 0.085)));
-  float dk = min(min(hair, scarf), boots);
-  return vec2(min(d, dk) * BOY_S, dk < d ? 1.0 : 0.0);
+  float dk = min(hair, boots);
+  float m = 0.0;
+  float r = d;
+  if (dk < r) { r = dk; m = 1.0; }
+  if (scarf < r) { r = scarf; m = 2.0; }
+  return vec2(r * BOY_S, m);
 }
 
 // ---------------- little tree on the giant's other shoulder ----------------
 const float TREE_S = 0.6;
 vec2 sdTree(vec3 pw) {
-  vec3 p = (pw - uTreePos) / TREE_S;
+  vec3 p = (pw - gTree) / TREE_S;
   float bd = length(p - vec3(0.0, 1.3, 0.0)) - 1.7;
   if (bd > 0.4) return vec2(bd * TREE_S, 0.0);
   float trunk = sdRoundCone(p, vec3(0.0, -0.3, 0.0), vec3(-0.1, 1.15, 0.05), 0.13, 0.055);
@@ -190,7 +225,7 @@ vec2 sdTree(vec3 pw) {
 
 // ---------------- clouds ----------------
 float sdClouds(vec3 p) {
-  vec3 q = p - vec3(-95.0, 122.0, -480.0);
+  vec3 q = p - vec3(-99.0, 112.0, -545.0);
   float d = length(q) - 125.0;
   if (d < 8.0) {
     float c = sdEllipsoid(q - vec3(0.0, -14.0, 0.0), vec3(70.0, 16.0, 34.0));
@@ -219,8 +254,8 @@ float sdClouds(vec3 p) {
 }
 
 // ---------------- distant ridges (analytic curtains) ----------------
-const vec4 RIDGE[4] = vec4[4](vec4(110.0, -12.0, 14.0, 1.0 / 34.0), vec4(190.0, -9.0, 25.0, 1.0 / 55.0),
-                              vec4(320.0, -6.0, 37.0, 1.0 / 90.0), vec4(560.0, -3.0, 60.0, 1.0 / 150.0));
+const vec4 RIDGE[4] = vec4[4](vec4(110.0, -2.0, 14.0, 1.0 / 34.0), vec4(190.0, 0.0, 25.0, 1.0 / 55.0),
+                              vec4(320.0, 2.0, 37.0, 1.0 / 90.0), vec4(560.0, 4.0, 60.0, 1.0 / 150.0));
 float sunAz() { return atan(uSun.x, -uSun.z); }
 float ridgeH(int k, float x) {
   vec4 r = RIDGE[k];
@@ -229,7 +264,7 @@ float ridgeH(int k, float x) {
   for (int i = 0; i < 5; i++) { float n = noise1(u * f); n = 1.0 - abs(2.0 * n - 1.0); s += a * n * n; a *= 0.5; f *= 2.13; }
   // a gap in the ranges where the sun comes up
   float az = atan(x - uCamPos.x, uCamPos.z + r.x);
-  float gap = 1.0 - 0.8 * exp(-pow((az - sunAz() + 0.01) / 0.075, 2.0));
+  float gap = 1.0 - 0.7 * exp(-pow((az - sunAz() + 0.005) / 0.045, 2.0));
   float h = r.y + r.z * s * gap;
   // conifers along the two nearer ridgelines
   if (k < 2) {
@@ -250,11 +285,9 @@ float ridgeH(int k, float x) {
 }
 
 vec2 mapScene(vec3 p) {
-  vec2 res = vec2((p.y - terrainH(p.xz)) * 0.55, ID_TERRAIN);
-  float g = sdGiant(p);
-  if (g < res.x) res = vec2(g, ID_GIANT);
+  vec2 res = vec2(sdGiant(p), ID_GIANT);
   vec2 b = sdBoy(p);
-  if (b.x < res.x) res = vec2(b.x, b.y > 0.5 ? ID_DARK : ID_BOY);
+  if (b.x < res.x) res = vec2(b.x, b.y > 1.5 ? ID_SCARF : (b.y > 0.5 ? ID_DARK : ID_BOY));
   vec2 t = sdTree(p);
   if (t.x < res.x) res = vec2(t.x, t.y > 0.5 ? ID_TREE : ID_TRUNK);
   float c = sdClouds(p);
@@ -263,8 +296,7 @@ vec2 mapScene(vec3 p) {
 }
 float mapShadow(vec3 p) {
   float d = min(sdGiant(p), sdBoy(p).x);
-  d = min(d, sdTree(p).x);
-  return min(d, (p.y - terrainH(p.xz)) * 0.55);
+  return min(d, sdTree(p).x);
 }
 vec3 calcNormal(vec3 p, float t) {
   float e = 0.0012 * t + 0.002;
@@ -347,20 +379,23 @@ float skyInk(vec3 rd, vec2 fc) {
   float li = floor(sl + 0.5);
   float azpx = atan(rd.x, -rd.z) * fpx;
   float dash = smoothstep(0.45, 0.55, noise1(azpx / (70.0 * uScale) + li * 7.31));
-  float dark = 0.55 * smoothstep(0.1, 0.32, rd.y);
-  float glow = smoothstep(Rs * 2.0, Rs * 11.0, dpx);
+  float dark = 0.42 * smoothstep(0.16, 0.34, rd.y);
+  float glow = smoothstep(Rs * 3.0, Rs * 16.0, dpx);
   ink = max(ink, lineAA(sl + 0.2 * (noise1(azpx / (25.0 * uScale)) - 0.5), 1.0 / S, dark * dash * glow * 0.4));
   return ink;
 }
 
-void encodeOut(float ink, float id, float t, vec3 n, float grass) {
+void encodeOut(float ink, float id, float t, vec3 n, float grass, float fade) {
   float v = clamp(log2(max(t, 1.0)) / 12.0, 0.0, 1.0) * 65535.0;
   float hi = floor(v / 256.0), lo = v - hi * 256.0;
   oA = vec4(clamp(ink, 0.0, 1.0), id / 255.0, hi / 255.0, floor(lo) / 255.0);
-  oB = vec4(n * 0.5 + 0.5, clamp(grass, 0.0, 1.0));
+  float a = fade > 0.02 ? 0.5 + 0.5 * clamp(fade, 0.0, 1.0) : 0.49 * clamp(grass, 0.0, 1.0);
+  oB = vec4(n * 0.5 + 0.5, a);
 }
 
 void main() {
+  gBoy = vec3(uBoyPos.x, giantSurfaceY(uBoyPos.xz) - 0.035, uBoyPos.z);
+  gTree = vec3(uTreePos.x, giantSurfaceY(uTreePos.xz) - 0.12, uTreePos.z);
   vec2 fc = gl_FragCoord.xy;
   vec2 uv = (2.0 * fc - uRes) / uRes.y;
   vec3 rdRaw = uv.x * uCamR + uv.y * uCamU + uFocal * uCamF;
@@ -394,7 +429,17 @@ void main() {
   }
 
   if (hit.y < 0.0) {
-    if (tM < tR) { encodeOut(0.0, ID_MIST, tM, vec3(0.0), 0.0); return; }
+    if (tM < tR) {
+      // a few wisps drawn across the sea of mist
+      vec3 q = ro + rd * tM;
+      vec3 qdx = tM * (drdx - rd * drdx.y / rd.y), qdy = tM * (drdy - rd * drdy.y / rd.y);
+      float s = q.z * 0.5 + 3.0 * (noise1(q.x * 0.025) - 0.5);
+      float fw = length(vec2(qdx.z, qdy.z)) * 0.5;
+      float dash = smoothstep(0.55, 0.7, noise2(vec2(q.x * 0.03, q.z * 0.08)));
+      float wisp = hatchLOD(s, fw, 0.13 * dash, 22.0 * uScale) * smoothstep(1400.0, 300.0, tM);
+      encodeOut(wisp, ID_MIST, tM, vec3(0.0), 0.0, 0.0);
+      return;
+    }
     if (kR >= 0) {
       vec3 q = ro + rd * tR;
       float k = float(kR);
@@ -405,13 +450,13 @@ void main() {
       float rim = smoothstep(0.0, 2.5 + k * 1.5, h - q.y);
       float mist = smoothstep(MIST_Y - 0.5, MIST_Y + 9.0 + 3.0 * k, q.y);
       float frac = g * mist * mix(0.25, 1.0, rim);
-      float ang = hs > 0.0 ? 1.15 + 0.05 * k : 1.95 - 0.05 * k;
+      float ang = hs > 0.0 ? -0.32 : 0.3;
       float ink = screenHatch(fc, ang, (5.5 + 0.8 * k) * uScale, frac * 0.55);
-      if (kR == 0) ink = max(ink, screenHatch(fc, 0.2, 6.0 * uScale, smoothstep(0.45, 0.8, frac) * 0.4));
-      encodeOut(ink, ID_RIDGE + k, tR, vec3(0.0, 0.0, 1.0), 0.0);
+      if (kR == 0) ink = max(ink, screenHatch(fc, 1.45, 6.0 * uScale, smoothstep(0.45, 0.8, frac) * 0.35));
+      encodeOut(ink, ID_RIDGE + k, tR, vec3(0.0, 0.0, 1.0), 0.0, 0.0);
       return;
     }
-    encodeOut(skyInk(rd, fc), ID_SKY, 4000.0, vec3(0.0), 0.0);
+    encodeOut(skyInk(rd, fc), ID_SKY, 4000.0, vec3(0.0), 0.0, 0.0);
     return;
   }
 
@@ -431,7 +476,7 @@ void main() {
   float rim = pow(clamp(1.0 + dot(rd, N), 0.0, 1.0), 2.5) * clamp(dot(N, uSun) * 1.5 + 0.55, 0.0, 1.0);
   vec3 Lf = normalize(vec3(0.5, 0.8, 0.45));
   float fil = clamp(dot(N, Lf), 0.0, 1.0);
-  float tone = (0.24 + 0.55 * fil + 0.12 * N.y) * mix(0.62, 1.0, ao) + 0.85 * dif * sh + 0.6 * rim;
+  float tone = (0.33 + 0.55 * fil + 0.12 * N.y) * mix(0.6, 1.0, ao) + 0.85 * dif * sh + 0.6 * rim;
   float press = 0.75 + 0.5 * noise3(p * 1.9 + 4.0);
   float ink = 0.0, grass = 0.0;
 
@@ -446,22 +491,47 @@ void main() {
     ink = 1.0 - (1.0 - c1) * (1.0 - c2) * (1.0 - c3);
     // cracks in the stone
     float cn = noise3(p * 0.42 + 7.0);
-    float fwc = 0.55 * length(dpdx) * 0.42 * 1.4 / max(uScale, 0.5);
-    float crack = 1.0 - smoothstep(fwc * 0.9, fwc * 2.0 + 0.004, abs(cn - 0.5));
+    float fwc = max(fwidth(cn), 1e-4) * uScale;
+    float crack = 1.0 - smoothstep(0.6 * fwc, 1.6 * fwc, abs(cn - 0.5));
     crack *= smoothstep(0.55, 0.68, noise3(p * 0.18 + 3.0)) * smoothstep(0.25, 0.0, N.y);
     ink = max(ink, crack * 0.9);
     // moss: stipple and grass on the upward-facing surfaces
-    float moss = smoothstep(0.38, 0.7, N.y) * smoothstep(0.38, 0.55, fbm3(p * 0.55));
-    ink = max(ink, stipple(p.xz, 0.1, pxPerUnit, 0.35 * moss));
-    grass = moss * 0.28;
+    float moss = smoothstep(0.38, 0.7, N.y) * smoothstep(0.45, 0.62, fbm3(p * 0.55));
+    ink = max(ink, stipple(p.xz, 0.11, pxPerUnit, 0.3 * moss));
+    grass = moss * 0.2;
+    // hair: short strokes flowing down the back of the head
+    vec3 hv = p - HEAD_C;
+    float inHair = smoothstep(-0.05, 0.12, p.y - (HEAD_C.y - 0.5 - 0.35 * hv.z)) * step(length(hv), 1.9);
+    if (inHair > 0.0) {
+      vec3 hn = normalize(hv);
+      vec2 huv = vec2(atan(hn.x, hn.z) * 9.0, acos(clamp(hn.y, -1.0, 1.0)) * 11.0);
+      vec2 hc = floor(huv);
+      float hs = 0.0;
+      for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+        vec2 cc = hc + vec2(float(i), float(j));
+        vec2 o = cc + vec2(hash12(cc), hash12(cc + 4.3)) ;
+        vec2 dd = huv - o;
+        float along = clamp(dd.y, 0.0, 0.9);
+        float bend = 0.18 * along * along;
+        float dist = length(vec2(dd.x - bend, dd.y - along));
+        float fwh = max(length(fwidth(huv)), 1e-3);
+        float w = (0.55 + 0.5 * (1.0 - along / 0.9)) * fwh * uScale;
+        if (hash12(cc + 9.7) < 0.35 + 0.6 * g) hs = max(hs, 1.0 - smoothstep(w, w + fwh, dist));
+      }
+      ink = mix(ink, max(ink * 0.6, hs), inHair);
+      grass = max(grass, inHair * smoothstep(0.2, 0.6, N.y) * 0.45);
+    }
   } else if (id == ID_BOY) {
-    float g = 1.0 - clamp(tone * 0.6, 0.0, 1.0);
-    float c1 = screenHatch(fc, 0.9, 3.6 * uScale, smoothstep(0.2, 0.9, g) * 0.7);
-    float c2 = screenHatch(fc, -0.7, 3.8 * uScale, smoothstep(0.5, 1.0, g) * 0.65);
-    ink = 1.0 - (1.0 - c1) * (1.0 - c2);
-    ink = max(ink, smoothstep(0.86, 0.95, g));
+    float halo = pow(clamp(1.0 + dot(rd, N), 0.0, 1.0), 3.0);
+    float g = 1.0 - clamp(tone * 0.55 + 1.3 * halo * clamp(N.x * 0.6 + N.y * 0.5 + 0.6, 0.0, 1.0), 0.0, 1.0);
+    ink = smoothstep(0.35, 0.6, g);
+    ink = max(ink, screenHatch(fc, 0.9, 3.0 * uScale, smoothstep(0.1, 0.4, g) * 0.6));
   } else if (id == ID_DARK) {
-    ink = 1.0 - smoothstep(0.75, 0.95, tone) * 0.8;
+    float halo = pow(clamp(1.0 + dot(rd, N), 0.0, 1.0), 3.0);
+    ink = 1.0 - smoothstep(0.35, 0.7, halo * clamp(N.x * 0.6 + N.y * 0.5 + 0.6, 0.0, 1.0)) * 0.85;
+  } else if (id == ID_SCARF) {
+    float g = 1.0 - clamp(tone, 0.0, 1.0);
+    ink = screenHatch(fc, 1.3, 3.2 * uScale, smoothstep(0.35, 0.9, g) * 0.45);
   } else if (id == ID_TREE) {
     float g = 1.0 - clamp(tone * 0.9, 0.0, 1.0);
     float c1 = worldHatch(p, normalize(vec3(0.5, 1.0, 0.2)), dpdx, dpdy, smoothstep(0.15, 0.9, g) * 0.6 * press, 5.0 * uScale, 2.0);
@@ -476,7 +546,7 @@ void main() {
     ink = max(screenHatch(fc, 1.45, 3.0 * uScale, 0.6), smoothstep(0.4, 0.2, tone));
   } else if (id == ID_CLOUD) {
     float aerial = clamp(t / 900.0, 0.0, 1.0);
-    float ct = 0.5 + 0.42 * N.y + 0.5 * rim + 0.4 * dif;
+    float ct = 0.62 + 0.38 * N.y + 0.5 * rim + 0.4 * dif;
     ct = mix(ct, 1.0, 0.2 * aerial);
     float g = 1.0 - clamp(ct, 0.0, 1.0);
     float c1 = worldHatch(p, vec3(0.0, 1.0, 0.0), dpdx, dpdy, smoothstep(0.3, 0.75, g) * 0.4 * press, 7.0 * uScale, 1.2);
@@ -485,14 +555,20 @@ void main() {
   } else {
     // terrain
     float mist = smoothstep(MIST_Y - 0.5, MIST_Y + 7.0, p.y);
-    if (p.y < MIST_Y + 0.3) { encodeOut(0.0, ID_MIST, t, vec3(0.0), 0.0); return; }
+    if (p.y < MIST_Y + 0.3) { encodeOut(0.0, ID_MIST, t, vec3(0.0), 0.0, 0.0); return; }
     float g = (1.0 - clamp(tone, 0.0, 1.0)) * mist;
     float c1 = worldHatch(p, normalize(vec3(0.05, 1.0, 0.0)), dpdx, dpdy, smoothstep(0.3, 0.9, g) * 0.5 * press, 8.0 * uScale, 2.5);
     float c2 = screenHatch(fc, 1.1, 6.5 * uScale, smoothstep(0.62, 1.0, g) * 0.4);
     ink = 1.0 - (1.0 - c1) * (1.0 - c2);
     grass = mist * smoothstep(70.0, 25.0, t) * (0.22 + 0.4 * smoothstep(0.4, 0.8, g));
   }
-  encodeOut(ink, id, t, N, grass);
+  float fade = 0.0;
+  if (id == ID_GIANT) {
+    float m = smoothstep(MIST_Y + 0.3, MIST_Y + 4.8, p.y + 0.9 * (noise1(p.x * 0.9) - 0.5));
+    ink *= m;
+    fade = 1.0 - m;
+  }
+  encodeOut(ink, id, t, N, grass, fade);
 }
 `;
 
@@ -532,8 +608,9 @@ float blades(vec2 fc, float myDepth) {
   float cw = 4.0 * uScale, ch = 4.5 * uScale, maxH = 44.0 * uScale;
   float any = 0.0;
   for (int i = 0; i < 5; i++) {
-    any = max(any, texelFetch(tB, clampC(fc - vec2(-6.0 * uScale, float(i) * maxH / 4.0)), 0).a);
-    any = max(any, texelFetch(tB, clampC(fc - vec2(6.0 * uScale, float(i) * maxH / 4.0)), 0).a);
+    float a1 = texelFetch(tB, clampC(fc - vec2(-6.0 * uScale, float(i) * maxH / 4.0)), 0).a;
+    float a2 = texelFetch(tB, clampC(fc - vec2(6.0 * uScale, float(i) * maxH / 4.0)), 0).a;
+    any = max(any, max(a1 < 0.495 ? a1 : 0.0, a2 < 0.495 ? a2 : 0.0));
   }
   if (any < 0.01) return 0.0;
   float ink = 0.0;
@@ -545,12 +622,12 @@ float blades(vec2 fc, float myDepth) {
       vec2 root = (cell + vec2(hash12(cell + 1.7), hash12(cell + 5.3))) * vec2(cw, ch);
       ivec2 rc = clampC(root);
       vec4 rb = texelFetch(tB, rc, 0);
-      if (hash12(cell + 0.37) > rb.a) continue;
+      if (rb.a > 0.495 || hash12(cell + 0.37) > rb.a * 2.04) continue;
       vec4 ra = texelFetch(tA, rc, 0);
       float rid = idOf(ra);
       float rdep = decodeDepth(ra);
       if (myDepth < rdep * 0.97) continue;
-      float wh = rid == ID_GIANT ? 0.11 : 0.42;
+      float wh = rid == ID_GIANT ? 0.085 : 0.42;
       float H = min(maxH, wh * uFpx / rdep) * (0.5 + 0.7 * hash12(cell + 9.1));
       if (H < 2.0 * uScale) continue;
       float sy = (fc.y - root.y) / H;
@@ -576,7 +653,7 @@ void main() {
   float e = 0.0;
   vec2 wob = (vec2(noise2(fc * 0.012 / uScale), noise2(fc * 0.012 / uScale + 17.0)) - 0.5) * 2.2 * uScale;
   for (int ring = 0; ring < 2; ring++) {
-    float r = (ring == 0 ? 1.1 : 2.1) * uScale;
+    float r = (ring == 0 ? 1.4 : 2.8) * uScale;
     for (int i = 0; i < 8; i++) {
       float ang = float(i) * 0.785398 + float(ring) * 0.3927;
       vec2 o = vec2(cos(ang), sin(ang)) * r + wob * 0.5;
@@ -585,6 +662,8 @@ void main() {
       e = max(e, edgeStrength(id, dep, n, idOf(a2), decodeDepth(a2), b2.xyz * 2.0 - 1.0, ring));
     }
   }
+  float fadeC = b.a > 0.495 ? (b.a - 0.5) * 2.0 : 0.0;
+  e *= 1.0 - smoothstep(0.1, 0.9, fadeC);
   float bl = blades(fc, dep);
   float ink = max(max(fill, e), bl);
 
@@ -628,11 +707,11 @@ void main() {
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
 
   var DEFAULTS = {
-    cam: [4.2, 10.3, 25.0],
-    target: [1.2, 9.6, -10.0],
-    fovY: 34,
-    sunAz: 3.4,
-    sunEl: 0.5,
+    cam: [4.2, 9.9, 36.0],
+    target: [0.9, 11.5, -10.0],
+    fovY: 28,
+    sunAz: 3.85,
+    sunEl: 0.55,
     boy: [3.0, 9.2, -0.35],
     boyYaw: 0.0,
     tree: [-0.55, 12.15, -0.5]
