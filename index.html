@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="white">
+  <meta name="description" content="Darren Wu">
+  <title>Darren Wu</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root { --fg: #111; --muted: #6b6b6b; --line: #e6e6e6; --bg: #fff; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: var(--bg); color: var(--fg); }
+    body {
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 15px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+    }
+    main {
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    .text {
+      display: flex; flex-direction: column; justify-content: center;
+      padding: 64px clamp(24px, 7vw, 112px);
+      max-width: 620px; justify-self: end; width: 100%;
+    }
+    h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 20px; }
+    p { margin-bottom: 14px; color: #222; }
+    .muted { color: var(--muted); }
+    a { color: inherit; text-decoration: underline; text-decoration-color: #bbb; text-underline-offset: 3px; transition: text-decoration-color .15s; }
+    a:hover { text-decoration-color: currentColor; }
+    .links { display: flex; gap: 18px; margin-top: 18px; font-size: 14px; }
+    .art {
+      display: flex; align-items: center; justify-content: center;
+      padding: 48px clamp(24px, 5vw, 80px);
+    }
+    .art figure { width: 100%; max-width: 520px; }
+    .art img { width: 100%; height: auto; display: block; }
+    .art figcaption { margin-top: 10px; font-size: 12px; color: var(--muted); text-align: center; font-style: italic; }
+    @media (max-width: 820px) {
+      main { grid-template-columns: 1fr; }
+      .text { justify-self: start; padding: 56px 24px 8px; max-width: none; }
+      .art { padding: 24px 24px 56px; }
+      .art figure { max-width: 420px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="text">
+      <h1>Darren Wu</h1>
+      <p>I work on midtraining (RL) scaling and inference performance at <a href="https://deepmind.google/">Google DeepMind</a>.</p>
+      <p>Before that, I interned at <a href="https://stripe.com/">Stripe</a> and <a href="https://research.google/">Google Brain</a>.</p>
+      <p>I studied Electrical Engineering, Computer Science, and Mathematics at <a href="https://duke.edu/">Duke University</a>.</p>
+      <p>I've been an open-source contributor to <a href="https://github.com/jax-ml/jax">JAX</a>, <a href="https://github.com/jax-ml/jax/tree/main/jax/experimental/pallas">Pallas</a>, <a href="https://github.com/openxla/xla">XLA</a>, <a href="https://github.com/pytorch/pytorch">PyTorch</a>, <a href="https://github.com/tensorflow/tensorflow">TensorFlow</a>, <a href="https://github.com/vllm-project/vllm">vLLM</a>, and <a href="https://github.com/llvm/llvm-project">LLVM</a>.</p>
+      <div class="links">
+        <a href="https://github.com/yduw">GitHub</a>
+        <a href="https://www.linkedin.com/in/darrenw88/">LinkedIn</a>
+      </div>
+    </section>
+    <section class="art">
+      <figure>
+        <img src="giant.svg" alt="Ink drawing of a small boy with a windswept scarf standing on the shoulder of a moss-covered stone giant, both looking toward a low sun over rolling hills.">
+        <figcaption>on the shoulders of giants</figcaption>
+      </figure>
+    </section>
+  </main>
+</body>
+</html>
