@@ -25,7 +25,8 @@
       column-gap: clamp(28px, 4vw, 56px);
       padding: 32px clamp(24px, 5vw, 64px);
     }
-    h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 20px; }
+    h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 6px; }
+    .meta { margin-bottom: 22px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
     p { margin-bottom: 14px; color: var(--text); }
     a { color: inherit; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; transition: text-decoration-color .15s; }
     a:hover { text-decoration-color: currentColor; }
@@ -51,7 +52,8 @@
   <main>
     <section class="text">
       <h1>Darren Wu</h1>
-      <p>I work on midtraining (RL) scaling and inference performance at <a href="https://deepmind.google/">Google DeepMind</a>. I was a core contributor to <a href="https://blog.google/innovation-and-ai/models-and-research/google-deepmind/gemini-model-thinking-updates-march-2025/">Gemini 2.5</a>, <a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-pro/">3.1</a>, and <a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/">4+</a>.</p>
+      <p class="meta">San Francisco, California<span id="clock-sep" hidden> &middot; </span><time id="clock"></time></p>
+      <p>I currently work on midtraining (RL) scaling and inference performance at <a href="https://deepmind.google/">Google DeepMind</a>. I was a core contributor to <a href="https://blog.google/innovation-and-ai/models-and-research/google-deepmind/gemini-model-thinking-updates-march-2025/">Gemini 2.5</a>, <a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-pro/">3.1</a>, and <a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/">4+</a>.</p>
       <p>Before that, I interned at <a href="https://stripe.com/">Stripe</a> and <a href="https://research.google/">Google Brain</a>.</p>
       <p>I studied Electrical Engineering, Computer Science, and Mathematics at <a href="https://duke.edu/">Duke University</a>. There, I was part of <a href="https://github.com/duke-electric-vehicles">Duke Electric Vehicles</a> and researched the influence of air pollution on climate and human health under <a href="https://bergin.pratt.duke.edu/">Dr. Mike Bergin</a>.</p>
       <p>I've been an open-source contributor to <a href="https://github.com/jax-ml/jax">JAX</a>, <a href="https://github.com/jax-ml/jax/tree/main/jax/experimental/pallas">Pallas</a>, <a href="https://github.com/openxla/xla">XLA</a>, <a href="https://github.com/pytorch/pytorch">PyTorch</a>, <a href="https://github.com/tensorflow/tensorflow">TensorFlow</a>, <a href="https://github.com/vllm-project/vllm">vLLM</a>, <a href="https://github.com/llvm/llvm-project">LLVM</a>, and more.</p>
@@ -67,5 +69,23 @@
       </figure>
     </section>
   </main>
+  <script>
+    // local time in San Francisco, ticking on the second
+    (function () {
+      var el = document.getElementById('clock'), sep = document.getElementById('clock-sep');
+      var fmt;
+      try {
+        fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' });
+      } catch (e) { return; }
+      function tick() {
+        var now = new Date();
+        el.textContent = fmt.format(now);
+        el.dateTime = now.toISOString();
+        setTimeout(tick, 1005 - now.getMilliseconds());
+      }
+      sep.hidden = false;
+      tick();
+    })();
+  </script>
 </body>
 </html>
